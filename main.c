@@ -71,10 +71,22 @@ void init_rtc(void)
 	sfr_CLK.ECKR.LSEON = 1; // Turn on LSE clock
 	while (sfr_CLK.ECKR.LSERDY == 0);
 	
+	sfr_RTC.ISR1.INIT = 1; // Set INIT
 	sfr_RTC.ISR1.INITF = 1; // Set INITF
+	long_delay();
 	sfr_RTC.CR1.FMT = 1; // Set 12 hour format
 	sfr_RTC.ISR1.WUTWF = 1;
+	sfr_RTC.CR1.WUCKSEL = 0;
+	sfr_RTC.CR1.RATIO = 0;
+	sfr_RTC.TR1.byte = 0;
+	sfr_RTC.TR2.byte = 0;
+	sfr_RTC.TR3.byte = 0;
+	sfr_RTC.DR1.byte = 0;
+	sfr_RTC.DR2.byte = 0;
+	sfr_RTC.DR3.byte = 0;
+
 	sfr_RTC.ISR1.INITF = 0;
+	sfr_RTC.ISR1.INIT = 0;
 	
 	// Set wakeup to 1 second. Wake up timer clock 32768/16 = 2048
 	sfr_RTC.WUTRH.byte = 2048 >> 8;
@@ -111,14 +123,42 @@ enum State { CLOCK, TIMER };
 
 enum State state = CLOCK;
 
+u8 frame_buf[frame_size]; 
+
+uint8_t lastSec = 0xff;
+uint8_t x = 0;
+
 void clock_update(void)
 {
+	//static uint8_t lastSec = 0xff;
+	//static
+	//uint8_t newSec = sfr_RTC.TR1.byte;
+	//if (newSec != lastSec)
+	if (1)
+	{
+		memset(frame_buf, 0, frame_size);
+		//write_digit(frame_buf, digit1, sfr_RTC.TR1.SU);
+		write_digit(frame_buf, digit1, sfr_RTC.TR1.SU);
+		//write_digit(frame_buf, digit1, x++ % 10);
+		write_digit(frame_buf, digit2, sfr_RTC.TR1.ST);
+		write_digit(frame_buf, digit3, sfr_RTC.TR2.MNU);
+		if (sfr_RTC.TR2.MNT > 0)
+		{
+			write_digit(frame_buf, digit4, 1);
+		}
 
+		memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
+		//lastSec = newSec;
+	}
+}
+
+void timer_update(void)
+{
+	ENTER_HALT();
 }
 
 void main(void)
 {
-  	u8 frame_buf[frame_size]; 
 
 	init_clocks();
   	init_rtc();
@@ -127,16 +167,17 @@ void main(void)
 
 	for(;;)
 	{
-		int i;
-		for (i = 0; i < 2; i++)
+		switch (state)
 		{
-			memset(frame_buf, 0, frame_size);
-			write_digit(frame_buf, digit1, i);
-			write_digit(frame_buf, digit2, i);
-			write_digit(frame_buf, digit3, i);
-			write_digit(frame_buf, digit4, 1);
-			memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
-			ENTER_HALT();
+			case CLOCK:
+				clock_update();
+				sfr_RTC.ISR2.byte = 0;
+				ENTER_HALT();
+				//long_delay();
+			break;
+			case TIMER:
+				timer_update();
+			break;
 		}		 
 	}
 }
