@@ -62,86 +62,81 @@ void long_delay(void)
 
 void init_rtc(void)
 {
+	sfr_CLK.PCKENR2.PCKEN23 = 1; // Enable RTC clock
+
 	// Unprotect
 	sfr_RTC.WPR.byte = 0xCA;
 	sfr_RTC.WPR.byte = 0x53;
 	
-	sfr_CLK.ECKR.byte |= 1 << 2; // Turn on LSE clock
-	while ((sfr_CLK.ECKR.LSERDY) == 0);
+	sfr_CLK.ECKR.LSEON = 1; // Turn on LSE clock
+	while (sfr_CLK.ECKR.LSERDY == 0);
 	
-	sfr_RTC.ISR1.byte = (1 << 6); // Set INITF
-	sfr_RTC.CR1.byte = (1 << 6) | (0); // Set 12 hour format
-	sfr_RTC.ISR1.byte = (1 << 2); // Clear INITF and set WUTWF
+	sfr_RTC.ISR1.INITF = 1; // Set INITF
+	sfr_RTC.CR1.FMT = 1; // Set 12 hour format
+	sfr_RTC.ISR1.WUTWF = 1;
+	sfr_RTC.ISR1.INITF = 0;
 	
 	// Set wakeup to 1 second. Wake up timer clock 32768/16 = 2048
 	sfr_RTC.WUTRH.byte = 2048 >> 8;
 	sfr_RTC.WUTRL.byte = 2048 & 0xff;
 	
-	
-	sfr_RTC.ISR2.byte = 0;
-	sfr_RTC.CR3.byte = 3 << 5;
-	sfr_RTC.CR2.byte |= (1 << 2) | (1 << 6); // Set Wakeup enable
-	
-	sfr_RTC.ISR1.byte = 0; // Clear init flags;
-
+	sfr_RTC.ISR2.WUTF = 0;
+	sfr_RTC.CR3.OSEL = 3; // Enable wake output
+	sfr_RTC.CR2.WUTE = 1; // Set Wakeup enable
+	sfr_RTC.CR2.WUTIE = 1; // Set Wakeup interrupt enable
 }
 
-void clear_wakeup(void)
+void init_lcd(void)
 {
-	sfr_RTC.ISR2.byte = 0;
+	sfr_CLK.PCKENR2.PCKEN22 = 1; // Enable LCD clock
+  	sfr_LCD.FRQ.byte = (2 << 4) | (0); // Set prescalar to 16*(2^4)
+	sfr_LCD.PM0.byte = 0xff; // Enable 14 rows pins
+	sfr_LCD.PM1.byte = 0x3f; //     - " -
+	sfr_LCD.PM2.byte = 0x0;
+  	sfr_LCD.PM3.byte = 0x0;
+
+	sfr_LCD.CR1.byte = (0 << 6) | ( 4 << 3) | (3 << 1) | 1; // Blink all with Flcd/128, 1/2 duty, 1/3 bias
+	sfr_LCD.CR2.byte = (4u << 5) | (4u << 1); // 4 clk pulses on duration, VLCD4 volatge, internal VLCD
+	sfr_LCD.CR3.byte = (1 << 6) | (0); // Enable and no dead time, interrupt disable
+
 }
 
+void init_clocks(void)
+{
+	sfr_CLK.CKDIVR.byte = 0;
+	sfr_CLK.CRTCR.byte = (8 << 1);
+}
 
+enum State { CLOCK, TIMER };
+
+enum State state = CLOCK;
+
+void clock_update(void)
+{
+
+}
 
 void main(void)
 {
   	u8 frame_buf[frame_size]; 
 
-  	sfr_CLK.CKDIVR.byte = 0;
-	sfr_CLK.CRTCR.byte = (8 << 1);
-	sfr_CLK.PCKENR2.byte = (1 << 3) | (1 << 2); // Enable clock to RTC and LCD
-		
-  	sfr_LCD.FRQ.byte = (2 << 4) | (0); // Set prescalar to 16*(2^4)
-	sfr_LCD.PM0.byte = 0xff;
-	sfr_LCD.PM1.byte = 0x3f;
-	sfr_LCD.PM2.byte = 0x0;
-  	sfr_LCD.PM3.byte = 0x0;
+	init_clocks();
+  	init_rtc();
+	init_lcd();
 	
-  init_rtc();	
-	
-	//long_delay();
-	//_asm("halt");
-	
-	memset(&sfr_LCD.RAM0.byte, 0xff, 14);
-	sfr_LCD.RAM0.byte = 0x1;
-	sfr_LCD.RAM0.byte = 0xff;
-	
-	sfr_LCD.CR1.byte = (0 << 6) | ( 4 << 3) | (3 << 1) | 1; // Blink all with Flcd/128, 1/2 duty, 1/3 bias
-	sfr_LCD.CR2.byte = (4 << 5) | (4 << 1); // 4 clk pulses on duration, VLCD4 volatge, internal VLCD
-	sfr_LCD.CR3.byte = (1 << 6) | (0); // Enable and no dead time, interrupt disable
 
 	for(;;)
 	{
 		int i;
-		for (i = 0; i < 8; i++)
+		for (i = 0; i < 2; i++)
 		{
-			volatile long x;
 			memset(frame_buf, 0, frame_size);
 			write_digit(frame_buf, digit1, i);
 			write_digit(frame_buf, digit2, i);
 			write_digit(frame_buf, digit3, i);
 			write_digit(frame_buf, digit4, 1);
 			memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
-		  for (x = 0; x < 80000L; x++);
-			write_digit(frame_buf, digit4, 0);
-			memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
-			clear_wakeup();
 			ENTER_HALT();
-			__asm__("nop");
-			__asm__("nop");
-			__asm__("nop");
-			__asm__("nop");
-			clear_wakeup();
 		}		 
 	}
 }
