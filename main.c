@@ -60,9 +60,23 @@ void long_delay(void)
 	for (x = 0; x < 100000L; x++);
 }
 
+void toggle_dots(void)
+{
+	static uint8_t toggle = 1;
+	if (toggle)
+	{
+		sfr_LCD.RAM11.byte |= (1 << 6);
+	}
+	else
+	{
+		sfr_LCD.RAM11.byte &= ~(1 << 6);
+	}
+	toggle = !toggle;
+}
+
 void init_rtc(void)
 {
-	sfr_CLK.PCKENR2.PCKEN23 = 1; // Enable RTC clock
+	sfr_CLK.PCKENR2.PCKEN22 = 1; // Enable RTC clock
 
 	// Unprotect
 	sfr_RTC.WPR.byte = 0xCA;
@@ -70,15 +84,24 @@ void init_rtc(void)
 	
 	sfr_CLK.ECKR.LSEON = 1; // Turn on LSE clock
 	while (sfr_CLK.ECKR.LSERDY == 0);
+
+	sfr_RTC.CR1.byte = 0;
+	sfr_RTC.CR2.byte = 0;
+	sfr_RTC.CR3.byte = 0;
+
+	while (sfr_RTC.ISR1.WUTWF == 0);
 	
+	//sfr_RTC.ISR1.byte = (1 << 7);
+	//while ((sfr_RTC.ISR1.byte & (1 << 6)) == 0);
 	sfr_RTC.ISR1.INIT = 1; // Set INIT
-	sfr_RTC.ISR1.INITF = 1; // Set INITF
-	long_delay();
-	sfr_RTC.CR1.FMT = 1; // Set 12 hour format
-	sfr_RTC.ISR1.WUTWF = 1;
+	while (sfr_RTC.ISR1.INITF == 0);
+	//sfr_RTC.ISR1.INITF = 1; // Set INITF
+	//long_delay();
+	sfr_RTC.CR1.FMT = 1; // Set 12 hour format	
 	sfr_RTC.CR1.WUCKSEL = 0;
 	sfr_RTC.CR1.RATIO = 0;
 	sfr_RTC.TR1.byte = 0;
+	sfr_RTC.TR1.ST =5;
 	sfr_RTC.TR2.byte = 0;
 	sfr_RTC.TR3.byte = 0;
 	sfr_RTC.DR1.byte = 0;
@@ -89,8 +112,9 @@ void init_rtc(void)
 	sfr_RTC.ISR1.INIT = 0;
 	
 	// Set wakeup to 1 second. Wake up timer clock 32768/16 = 2048
-	sfr_RTC.WUTRH.byte = 2048 >> 8;
-	sfr_RTC.WUTRL.byte = 2048 & 0xff;
+	const int wake_time = 2048;
+	sfr_RTC.WUTRH.byte = wake_time >> 8;
+	sfr_RTC.WUTRL.byte = wake_time & 0xff;
 	
 	sfr_RTC.ISR2.WUTF = 0;
 	sfr_RTC.CR3.OSEL = 3; // Enable wake output
@@ -100,7 +124,7 @@ void init_rtc(void)
 
 void init_lcd(void)
 {
-	sfr_CLK.PCKENR2.PCKEN22 = 1; // Enable LCD clock
+	sfr_CLK.PCKENR2.PCKEN23 = 1; // Enable LCD clock
   	sfr_LCD.FRQ.byte = (2 << 4) | (0); // Set prescalar to 16*(2^4)
 	sfr_LCD.PM0.byte = 0xff; // Enable 14 rows pins
 	sfr_LCD.PM1.byte = 0x3f; //     - " -
@@ -125,31 +149,43 @@ enum State state = CLOCK;
 
 u8 frame_buf[frame_size]; 
 
-uint8_t lastSec = 0xff;
+//uint8_t lastSec = 0xff;
 uint8_t x = 0;
 
 void clock_update(void)
 {
-	//static uint8_t lastSec = 0xff;
+	static uint8_t lastSec = 0xff;
+	sfr_RTC.ISR1.RSF = 0;
+	while (sfr_RTC.ISR1.RSF == 0);
 	//static
-	//uint8_t newSec = sfr_RTC.TR1.byte;
-	//if (newSec != lastSec)
-	if (1)
-	{
+	uint8_t newSec = sfr_RTC.TR1.byte;
+	if (newSec != lastSec)
+	//if (1)
+	//if (0)
+	{		
+		uint8_t min = sfr_RTC.TR2.byte;
+		uint8_t hour = sfr_RTC.TR3.byte;
+		uint8_t year = sfr_RTC.DR3.byte;
+
 		memset(frame_buf, 0, frame_size);
 		//write_digit(frame_buf, digit1, sfr_RTC.TR1.SU);
-		write_digit(frame_buf, digit1, sfr_RTC.TR1.SU);
+		write_digit(frame_buf, digit1, newSec & 0xf);
 		//write_digit(frame_buf, digit1, x++ % 10);
-		write_digit(frame_buf, digit2, sfr_RTC.TR1.ST);
-		write_digit(frame_buf, digit3, sfr_RTC.TR2.MNU);
-		if (sfr_RTC.TR2.MNT > 0)
+		write_digit(frame_buf, digit2, newSec >> 4);
+		write_digit(frame_buf, digit3, min & 0xf);
+		if ((min >> 4) > 0)
 		{
 			write_digit(frame_buf, digit4, 1);
 		}
 
 		memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
-		//lastSec = newSec;
+		lastSec = newSec;
 	}
+	else 
+	{
+		sfr_RTC.DR3.byte;
+	}
+	toggle_dots();
 }
 
 void timer_update(void)
@@ -170,8 +206,8 @@ void main(void)
 		switch (state)
 		{
 			case CLOCK:
-				clock_update();
-				sfr_RTC.ISR2.byte = 0;
+				clock_update();				
+				//toggle_dots();
 				ENTER_HALT();
 				//long_delay();
 			break;
