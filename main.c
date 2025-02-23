@@ -101,9 +101,15 @@ void init_rtc(void)
 	sfr_RTC.CR1.WUCKSEL = 0;
 	sfr_RTC.CR1.RATIO = 0;
 	sfr_RTC.TR1.byte = 0;
-	sfr_RTC.TR1.ST =5;
+	sfr_RTC.TR1.SU = 5;
+	sfr_RTC.TR1.ST = 5;
 	sfr_RTC.TR2.byte = 0;
+	sfr_RTC.TR2.MNU =9;
+	sfr_RTC.TR2.MNT =5;
 	sfr_RTC.TR3.byte = 0;
+	sfr_RTC.TR3.HU = 1;
+	sfr_RTC.TR3.HT = 1;
+	sfr_RTC.TR3.PM = 0;
 	sfr_RTC.DR1.byte = 0;
 	sfr_RTC.DR2.byte = 0;
 	sfr_RTC.DR3.byte = 0;
@@ -154,36 +160,42 @@ uint8_t x = 0;
 
 void clock_update(void)
 {
-	static uint8_t lastSec = 0xff;
+	static uint8_t lastMin = 0xff;
 	sfr_RTC.ISR1.RSF = 0;
 	while (sfr_RTC.ISR1.RSF == 0);
 	//static
-	uint8_t newSec = sfr_RTC.TR1.byte;
-	if (newSec != lastSec)
+
+	uint8_t sec = sfr_RTC.TR1.byte;
+	uint8_t min = sfr_RTC.TR2.byte;
+	uint8_t hour = sfr_RTC.TR3.byte;
+	uint8_t year = sfr_RTC.DR3.byte;
+
+	if (min != lastMin)
 	//if (1)
 	//if (0)
 	{		
-		uint8_t min = sfr_RTC.TR2.byte;
-		uint8_t hour = sfr_RTC.TR3.byte;
-		uint8_t year = sfr_RTC.DR3.byte;
 
 		memset(frame_buf, 0, frame_size);
 		//write_digit(frame_buf, digit1, sfr_RTC.TR1.SU);
-		write_digit(frame_buf, digit1, newSec & 0xf);
+		write_digit(frame_buf, digit1, min & 0xf);
 		//write_digit(frame_buf, digit1, x++ % 10);
-		write_digit(frame_buf, digit2, newSec >> 4);
-		write_digit(frame_buf, digit3, min & 0xf);
-		if ((min >> 4) > 0)
+		write_digit(frame_buf, digit2, min >> 4);
+		write_digit(frame_buf, digit3, hour & 0xf);
+		if (((hour >> 4) & 3) > 0)
 		{
 			write_digit(frame_buf, digit4, 1);
 		}
+		if (hour & (1 << 6))
+		{
+			frame_buf[11] |= (1 << 3);
+		}
 
 		memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
-		lastSec = newSec;
+		lastMin = min;
 	}
 	else 
 	{
-		sfr_RTC.DR3.byte;
+		//sfr_RTC.DR3.byte;
 	}
 	toggle_dots();
 }
