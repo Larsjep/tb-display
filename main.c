@@ -18,20 +18,23 @@ ISR_HANDLER(WakeupInterrupt, _RTC_WAKEUP_VECTOR_)
 
 typedef unsigned char u8;
 
-u8 digit1[] = { 92, 63,  6,  7,  8, 64, 35 };
-u8 digit2[] = { 93, 65, 36,  9, 10, 66, 38 };
-u8 digit3[] = { 95, 67, 39, 11, 12, 68, 40 };
-u8 digit4[] = { 97, 69, 41, 13,  0,  0,  0 };
+//u8 serial_char = 0;
 
-u8 stars[] = { 33, 5 ,4 ,88, 60 };
-u8 brush_pos[] = { 1, 85, 2, 31, 29 };
+const u8 digit1[] = { 92, 63,  6,  7,  8, 64, 35 };
+const u8 digit2[] = { 93, 65, 36,  9, 10, 66, 38 };
+const u8 digit3[] = { 95, 67, 39, 11, 12, 68, 40 };
+const u8 digit4[] = { 97, 69, 41, 13,  0,  0,  0 };
 
-u8 seg7_digits[] = { 0x7E, 0x30, 0x6D, 0x79, 0x33, 0x5B, 0x5F, 0x70, 0x7F, 0x7B };
+const u8 stars[] = { 33, 5 ,4 ,88, 60 };
+const u8 brush_pos[] = { 1, 85, 2, 31, 29 };
+
+const u8 seg7_digits[] = { 0x7E, 0x30, 0x6D, 0x79, 0x33, 0x5B, 0x5F, 0x70, 0x7F, 0x7B };
 
 
 void write_digit(u8* buf, u8* digit, u8 value)
 {
 	int i;
+	value = value % 10;
 	u8 segments = seg7_digits[value];
 	for (i = 0; i <= 7; i++)
 	{
@@ -149,18 +152,15 @@ void init_clocks(void)
 	sfr_CLK.CRTCR.byte = (8 << 1);
 }
 
-enum State { CLOCK, TIMER };
-
-enum State state = CLOCK;
 
 u8 frame_buf[frame_size]; 
 
 //uint8_t lastSec = 0xff;
 uint8_t x = 0;
+uint8_t lastMin = 0xff;
 
 void clock_update(void)
 {
-	static uint8_t lastMin = 0xff;
 	sfr_RTC.ISR1.RSF = 0;
 	while (sfr_RTC.ISR1.RSF == 0);
 	//static
@@ -202,7 +202,123 @@ void clock_update(void)
 
 void timer_update(void)
 {
-	ENTER_HALT();
+	// ENTER_HALT();
+}
+
+void write_lcd(uint8_t d4, uint8_t d3, uint8_t d2, uint8_t d1)
+{
+		memset(frame_buf, 0, frame_size);
+		write_digit(frame_buf, digit1, d1);
+		write_digit(frame_buf, digit2, d2);
+		write_digit(frame_buf, digit3, d3);
+
+		if (d4 > 0)
+		{
+			write_digit(frame_buf, digit4, 1);
+		}
+
+		memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
+}
+
+
+enum State { NONE, CLOCK, TIMER };
+enum State state = TIMER;
+
+enum SerialCommand { CMD_SETTIME = 0x2A, CMD_CLOCK, CMD_TIMER } serialCommand;
+u8 data[2];
+
+void execute_serial_command(enum SerialCommand cmd, u8 data[2])
+{
+	switch (cmd)
+	{
+	case CMD_SETTIME:
+		/* code */
+		break;
+
+	case CMD_CLOCK:
+		state = CLOCK;
+		lastMin = 0xff;
+		break;
+	case CMD_TIMER:
+		write_lcd(data[0] >> 4, data[0] & 0xf, data[1] >> 4, data[1] & 0xf);
+		state = TIMER;
+		ENTER_HALT();
+		break;
+	
+	default:
+		break;
+	}
+}
+
+
+enum SerialState { SS_IDLE, SS_START1, SS_START2, SS_CMD, SS_DATA1, SS_DATA2 } serialState = SS_IDLE;
+ISR_HANDLER(SerialRxInterrupt, _USART_R_RXNE_VECTOR_)
+{
+	u8 status = sfr_USART1.SR.byte;
+	u8 serial_char = sfr_USART1.DR.byte;
+	//sfr_USART1.DR.byte;
+
+//	write_lcd(data[0] >> 4, data[0] & 0xf, data[1] >> 4, data[1] & 0xf);
+	//if (serial_char > 5)
+	//{
+	//	write_lcd((status >> 3) & 0x1 , serial_char / 100, serial_char / 10, serial_char);
+	//}
+	// return;
+	//sfr_LCD.RAM0.byte++;
+
+
+	switch (serialState)
+	{
+		case SS_IDLE:
+			state = NONE;
+			if (serial_char == 0xAA)
+			{
+				//write_lcd(0, serial_char / 100, serial_char / 10, serial_char);
+				serialState = SS_CMD;
+			}
+			break;
+		case SS_CMD:
+			if (serial_char == CMD_SETTIME || serial_char == CMD_CLOCK || serial_char == CMD_TIMER)
+			{
+				serialCommand = serial_char;
+				serialState = SS_DATA1;
+			}
+			else
+			{
+				serialState = SS_IDLE;
+			}
+			break;
+		case SS_DATA1:
+			data[0] = serial_char;
+			serialState = SS_DATA2;
+			break;
+		case SS_DATA2:
+			data[1] = serial_char;
+			serialState = SS_IDLE;
+			execute_serial_command(serialCommand, data);
+			break;
+
+	}
+}
+
+
+ISR_HANDLER(Exti3Interrupt, _EXTI3_VECTOR_)
+{
+	sfr_ITC_EXTI.SR1.P3F = 1;
+}
+
+void init_serial_port(void)
+{
+  	sfr_CLK.PCKENR1.PCKEN15 = 1;
+	sfr_REMAP.SYSCFG_RMPCR1.USART1TR_REMAP = 1;
+	sfr_USART1.BRR2.byte = 0xB;
+	sfr_USART1.BRR1.byte = 0x8;
+
+
+	sfr_PORTA.CR2.C23 = 1;
+
+	sfr_USART1.CR2.RIEN = 1;
+	sfr_USART1.CR2.REN = 1;
 }
 
 void main(void)
@@ -211,6 +327,50 @@ void main(void)
 	init_clocks();
   	init_rtc();
 	init_lcd();
+
+	init_serial_port();
+	write_lcd(0,0,3,7);
+	//u8 sr = sfr_USART1.SR.byte;
+	//write_lcd(0, sr / 100, sr / 10, sr);
+	sfr_ITC_EXTI.SR1.P3F = 1;
+	ENABLE_INTERRUPTS();
+
+
+	// for (;;)
+	// {
+	// 	//u8 sr = sfr_USART1.SR.byte;
+	// 	//write_lcd(0, sr / 100, sr / 10, sr);
+
+
+	// 	// if (sfr_USART1.SR.RXNE)
+	// 	// {
+	// 	// 	u8 sr = 0;
+	// 	// 	//u8 sr = 48;
+	// 	// 	if (sfr_USART1.SR.FE)
+	// 	// 	{
+	// 	// 		sr = 222;
+	// 	// 		sfr_USART1.DR.byte;
+	// 	// 	}
+	// 	// 	else
+	// 	// 	{
+	// 	// 		sr = sfr_USART1.DR.byte;
+	// 	// 	}
+	// 	// 	write_lcd(0, sr / 100, sr / 10, sr);
+	// 	// }
+	// 	if (serial_char != 0)
+	// 	{
+	// 		write_lcd(0,serial_char / 100 ,serial_char / 10, serial_char);
+	// 		if (serial_char == 48)
+	// 		{
+	// 			ENTER_HALT();
+	// 		}
+	// 		serial_char = 0;
+	// 	}
+	// //	if (sfr_USART1.SR.RXNE)
+	// 	// {
+	// 	// 	serial_char = 7; //sfr_USART1.DR.byte;
+	// 	// }
+	// }
 	
 
 	for(;;)
@@ -219,9 +379,8 @@ void main(void)
 		{
 			case CLOCK:
 				clock_update();				
-				//toggle_dots();
+				toggle_dots();
 				ENTER_HALT();
-				//long_delay();
 			break;
 			case TIMER:
 				timer_update();
