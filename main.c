@@ -131,6 +131,24 @@ void init_rtc(void)
 	sfr_RTC.CR2.WUTIE = 1; // Set Wakeup interrupt enable
 }
 
+void set_rtc(u8 hour, u8 min)
+{
+	sfr_RTC.ISR1.INIT = 1; // Set INIT
+	while (sfr_RTC.ISR1.INITF == 0);
+
+
+	sfr_RTC.TR1.byte = 0;
+	sfr_RTC.TR2.byte = min;
+	sfr_RTC.TR3.byte = hour;
+	sfr_RTC.DR1.byte = 0;
+	sfr_RTC.DR2.byte = 0;
+	sfr_RTC.DR3.byte = 0;
+
+	sfr_RTC.ISR1.INITF = 0;
+	sfr_RTC.ISR1.INIT = 0;
+
+}
+
 void init_lcd(void)
 {
 	sfr_CLK.PCKENR2.PCKEN23 = 1; // Enable LCD clock
@@ -161,6 +179,7 @@ uint8_t lastMin = 0xff;
 
 void clock_update(void)
 {
+	sfr_RTC.DR3.byte;
 	sfr_RTC.ISR1.RSF = 0;
 	while (sfr_RTC.ISR1.RSF == 0);
 	//static
@@ -193,16 +212,7 @@ void clock_update(void)
 		memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
 		lastMin = min;
 	}
-	else 
-	{
-		//sfr_RTC.DR3.byte;
-	}
 	toggle_dots();
-}
-
-void timer_update(void)
-{
-	// ENTER_HALT();
 }
 
 void write_lcd(uint8_t d4, uint8_t d3, uint8_t d2, uint8_t d1)
@@ -232,7 +242,9 @@ void execute_serial_command(enum SerialCommand cmd, u8 data[2])
 	switch (cmd)
 	{
 	case CMD_SETTIME:
-		/* code */
+		set_rtc(data[0], data[1]);
+		state = CLOCK;
+		lastMin = 0xff;
 		break;
 
 	case CMD_CLOCK:
@@ -256,16 +268,6 @@ ISR_HANDLER(SerialRxInterrupt, _USART_R_RXNE_VECTOR_)
 {
 	u8 status = sfr_USART1.SR.byte;
 	u8 serial_char = sfr_USART1.DR.byte;
-	//sfr_USART1.DR.byte;
-
-//	write_lcd(data[0] >> 4, data[0] & 0xf, data[1] >> 4, data[1] & 0xf);
-	//if (serial_char > 5)
-	//{
-	//	write_lcd((status >> 3) & 0x1 , serial_char / 100, serial_char / 10, serial_char);
-	//}
-	// return;
-	//sfr_LCD.RAM0.byte++;
-
 
 	switch (serialState)
 	{
@@ -330,48 +332,8 @@ void main(void)
 
 	init_serial_port();
 	write_lcd(0,0,3,7);
-	//u8 sr = sfr_USART1.SR.byte;
-	//write_lcd(0, sr / 100, sr / 10, sr);
 	sfr_ITC_EXTI.SR1.P3F = 1;
 	ENABLE_INTERRUPTS();
-
-
-	// for (;;)
-	// {
-	// 	//u8 sr = sfr_USART1.SR.byte;
-	// 	//write_lcd(0, sr / 100, sr / 10, sr);
-
-
-	// 	// if (sfr_USART1.SR.RXNE)
-	// 	// {
-	// 	// 	u8 sr = 0;
-	// 	// 	//u8 sr = 48;
-	// 	// 	if (sfr_USART1.SR.FE)
-	// 	// 	{
-	// 	// 		sr = 222;
-	// 	// 		sfr_USART1.DR.byte;
-	// 	// 	}
-	// 	// 	else
-	// 	// 	{
-	// 	// 		sr = sfr_USART1.DR.byte;
-	// 	// 	}
-	// 	// 	write_lcd(0, sr / 100, sr / 10, sr);
-	// 	// }
-	// 	if (serial_char != 0)
-	// 	{
-	// 		write_lcd(0,serial_char / 100 ,serial_char / 10, serial_char);
-	// 		if (serial_char == 48)
-	// 		{
-	// 			ENTER_HALT();
-	// 		}
-	// 		serial_char = 0;
-	// 	}
-	// //	if (sfr_USART1.SR.RXNE)
-	// 	// {
-	// 	// 	serial_char = 7; //sfr_USART1.DR.byte;
-	// 	// }
-	// }
-	
 
 	for(;;)
 	{
@@ -379,11 +341,9 @@ void main(void)
 		{
 			case CLOCK:
 				clock_update();				
-				toggle_dots();
 				ENTER_HALT();
 			break;
 			case TIMER:
-				timer_update();
 			break;
 		}		 
 	}
