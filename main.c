@@ -131,13 +131,13 @@ void init_rtc(void)
 	sfr_RTC.CR2.WUTIE = 1; // Set Wakeup interrupt enable
 }
 
-void set_rtc(u8 hour, u8 min)
+void set_rtc(u8 hour, u8 min, u8 sec)
 {
 	sfr_RTC.ISR1.INIT = 1; // Set INIT
 	while (sfr_RTC.ISR1.INITF == 0);
 
 
-	sfr_RTC.TR1.byte = 0;
+	sfr_RTC.TR1.byte = sec;
 	sfr_RTC.TR2.byte = min;
 	sfr_RTC.TR3.byte = hour;
 	sfr_RTC.DR1.byte = 0;
@@ -234,15 +234,14 @@ void write_lcd(uint8_t d4, uint8_t d3, uint8_t d2, uint8_t d1)
 enum State { NONE, CLOCK, TIMER };
 enum State state = TIMER;
 
-enum SerialCommand { CMD_SETTIME = 0x2A, CMD_CLOCK, CMD_TIMER } serialCommand;
-u8 data[2];
 
+enum SerialCommand { CMD_SETTIME = 0x2A, CMD_CLOCK, CMD_TIMER };
 void execute_serial_command(enum SerialCommand cmd, u8 data[2])
 {
 	switch (cmd)
 	{
 	case CMD_SETTIME:
-		set_rtc(data[0], data[1]);
+		set_rtc(data[0], data[1], data[2]);
 		state = CLOCK;
 		lastMin = 0xff;
 		break;
@@ -263,16 +262,20 @@ void execute_serial_command(enum SerialCommand cmd, u8 data[2])
 }
 
 
-enum SerialState { SS_IDLE, SS_START1, SS_START2, SS_CMD, SS_DATA1, SS_DATA2 } serialState = SS_IDLE;
+enum SerialState { SS_IDLE, SS_CMD, SS_DATA } serialState = SS_IDLE;
+
 ISR_HANDLER(SerialRxInterrupt, _USART_R_RXNE_VECTOR_)
 {
 	u8 status = sfr_USART1.SR.byte;
 	u8 serial_char = sfr_USART1.DR.byte;
+	static u8 data[3];
+	static u8 data_left;
+	static u8 data_pos;
+	static enum SerialCommand serialCommand;
 
 	switch (serialState)
 	{
 		case SS_IDLE:
-			state = NONE;
 			if (serial_char == 0xAA)
 			{
 				//write_lcd(0, serial_char / 100, serial_char / 10, serial_char);
@@ -280,26 +283,43 @@ ISR_HANDLER(SerialRxInterrupt, _USART_R_RXNE_VECTOR_)
 			}
 			break;
 		case SS_CMD:
+			data_left = 0;
+			data_pos = 0;
 			if (serial_char == CMD_SETTIME || serial_char == CMD_CLOCK || serial_char == CMD_TIMER)
 			{
+				if (serial_char == CMD_SETTIME)
+				{
+					data_left = 3;
+				}
+
+				if (serial_char == CMD_TIMER)
+				{
+					data_left = 2;
+				}
+
 				serialCommand = serial_char;
-				serialState = SS_DATA1;
+				serialState = SS_DATA;
+
+				if (data_left == 0)
+				{
+					serialState = SS_IDLE;
+					execute_serial_command(serialCommand, data);
+				}
 			}
 			else
 			{
 				serialState = SS_IDLE;
 			}
 			break;
-		case SS_DATA1:
-			data[0] = serial_char;
-			serialState = SS_DATA2;
+		case SS_DATA:
+			data[data_pos++] = serial_char;
+			data_left--;
+			if (data_left == 0)
+			{
+				serialState = SS_IDLE;
+				execute_serial_command(serialCommand, data);
+			}
 			break;
-		case SS_DATA2:
-			data[1] = serial_char;
-			serialState = SS_IDLE;
-			execute_serial_command(serialCommand, data);
-			break;
-
 	}
 }
 
@@ -307,6 +327,7 @@ ISR_HANDLER(SerialRxInterrupt, _USART_R_RXNE_VECTOR_)
 ISR_HANDLER(Exti3Interrupt, _EXTI3_VECTOR_)
 {
 	sfr_ITC_EXTI.SR1.P3F = 1;
+	state = NONE;
 }
 
 void init_serial_port(void)
