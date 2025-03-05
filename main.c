@@ -8,17 +8,12 @@
 
 ISR_HANDLER(WakeupInterrupt, _RTC_WAKEUP_VECTOR_)
 {
-	/* in order to detect unexpected events during development, 
-	   it is recommended to set a breakpoint on the following instruction
-	*/
 	sfr_RTC.ISR2.byte = 0;
 	return;
 }
 
 
 typedef unsigned char u8;
-
-//u8 serial_char = 0;
 
 const u8 digit1[] = { 92, 63,  6,  7,  8, 64, 35 };
 const u8 digit2[] = { 93, 65, 36,  9, 10, 66, 38 };
@@ -36,7 +31,7 @@ void write_digit(u8* buf, u8* digit, u8 value)
 	int i;
 	value = value % 10;
 	u8 segments = seg7_digits[value];
-	for (i = 0; i <= 7; i++)
+	for (i = 0; i < 7; i++)
 	{
 		if (segments & (0x40 >> i))
 		{
@@ -110,7 +105,7 @@ void init_rtc(void)
 	sfr_RTC.TR2.MNU =9;
 	sfr_RTC.TR2.MNT =5;
 	sfr_RTC.TR3.byte = 0;
-	sfr_RTC.TR3.HU = 1;
+	sfr_RTC.TR3.HU = 2;
 	sfr_RTC.TR3.HT = 1;
 	sfr_RTC.TR3.PM = 0;
 	sfr_RTC.DR1.byte = 0;
@@ -172,47 +167,59 @@ void init_clocks(void)
 
 
 u8 frame_buf[frame_size]; 
-
-//uint8_t lastSec = 0xff;
-uint8_t x = 0;
 uint8_t lastMin = 0xff;
 
 void clock_update(void)
 {
+	static uint8_t dots = 0; // The state of the 2 dots between hours and minutes
+
 	sfr_RTC.DR3.byte;
 	sfr_RTC.ISR1.RSF = 0;
 	while (sfr_RTC.ISR1.RSF == 0);
-	//static
 
 	uint8_t sec = sfr_RTC.TR1.byte;
 	uint8_t min = sfr_RTC.TR2.byte;
 	uint8_t hour = sfr_RTC.TR3.byte;
 	uint8_t year = sfr_RTC.DR3.byte;
 
-	if (min != lastMin)
-	//if (1)
-	//if (0)
-	{		
+	dots = !dots;
 
+	if (min != lastMin)
+	{		
 		memset(frame_buf, 0, frame_size);
-		//write_digit(frame_buf, digit1, sfr_RTC.TR1.SU);
 		write_digit(frame_buf, digit1, min & 0xf);
-		//write_digit(frame_buf, digit1, x++ % 10);
 		write_digit(frame_buf, digit2, min >> 4);
 		write_digit(frame_buf, digit3, hour & 0xf);
 		if (((hour >> 4) & 3) > 0)
 		{
 			write_digit(frame_buf, digit4, 1);
 		}
-		if (hour & (1 << 6))
+		
+		if (dots)
 		{
-			frame_buf[11] |= (1 << 3);
+			frame_buf[11] |= 1 << 6;
 		}
 
 		memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
 		lastMin = min;
 	}
-	toggle_dots();
+	else
+	{
+		// For some reason a delay is needed after wakeup before the display can be updated
+		for (int i = 0; i < 30; i++)
+		{
+			__asm__("nop");
+		}
+
+		if (dots)
+		{
+			sfr_LCD.RAM11.byte |= 1 << 6;
+		}
+		else
+		{
+			sfr_LCD.RAM11.byte &= ~(1 << 6);
+		}
+	}
 }
 
 void write_lcd(uint8_t d4, uint8_t d3, uint8_t d2, uint8_t d1)
@@ -232,7 +239,7 @@ void write_lcd(uint8_t d4, uint8_t d3, uint8_t d2, uint8_t d1)
 
 
 enum State { NONE, CLOCK, TIMER };
-enum State state = TIMER;
+volatile enum State state = CLOCK;
 
 
 enum SerialCommand { CMD_SETTIME = 0x2A, CMD_CLOCK, CMD_TIMER };
@@ -363,8 +370,6 @@ void main(void)
 			case CLOCK:
 				clock_update();				
 				ENTER_HALT();
-			break;
-			case TIMER:
 			break;
 		}		 
 	}
