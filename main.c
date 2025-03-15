@@ -25,6 +25,13 @@ const u8 brush_pos[] = { 1, 85, 2, 31, 29 };
 
 const u8 seg7_digits[] = { 0x7E, 0x30, 0x6D, 0x79, 0x33, 0x5B, 0x5F, 0x70, 0x7F, 0x7B };
 
+inline void set_segment(u8* buf, u8 segment)
+{
+	u8 offset = segment >> 3;
+	u8 bit = segment & 0x7;
+	buf[offset] |= 1 << bit;
+}
+
 
 void write_digit(u8* buf, u8* digit, u8 value)
 {
@@ -35,13 +42,12 @@ void write_digit(u8* buf, u8* digit, u8 value)
 	{
 		if (segments & (0x40 >> i))
 		{
-			u8 offset = digit[i] >> 3;
-			u8 bit = digit[i] & 0x7;
-			buf[offset] |= 1 << bit;
+			set_segment(buf, digit[i]);
 		}		
 	}
 	
 }
+
 
 
 #define frame_size 13
@@ -56,20 +62,6 @@ void long_delay(void)
 {
 	volatile long x;
 	for (x = 0; x < 100000L; x++);
-}
-
-void toggle_dots(void)
-{
-	static uint8_t toggle = 1;
-	if (toggle)
-	{
-		sfr_LCD.RAM11.byte |= (1 << 6);
-	}
-	else
-	{
-		sfr_LCD.RAM11.byte &= ~(1 << 6);
-	}
-	toggle = !toggle;
 }
 
 void init_rtc(void)
@@ -224,7 +216,37 @@ void clock_update(void)
 
 void write_lcd(uint8_t d4, uint8_t d3, uint8_t d2, uint8_t d1)
 {
+		int seconds = d1 + 10*d2 + 60*d3 + 600*d4;		
 		memset(frame_buf, 0, frame_size);
+		set_segment(frame_buf, brush_pos[0]);
+		set_segment(frame_buf, brush_pos[1]);
+		set_segment(frame_buf, stars[0]);
+		if (seconds >= 30)
+		{
+			set_segment(frame_buf, brush_pos[2]);
+			set_segment(frame_buf, stars[1]);
+		}
+		if (seconds >= 60)
+		{
+			set_segment(frame_buf, brush_pos[3]);
+			set_segment(frame_buf, stars[2]);
+		}
+		if (seconds >= 90)
+		{
+			set_segment(frame_buf, brush_pos[4]);
+			set_segment(frame_buf, stars[3]);
+		}
+		if (seconds >= 120)
+		{
+			set_segment(frame_buf, stars[4]);
+			set_segment(frame_buf, 30);
+			set_segment(frame_buf, 58);
+			set_segment(frame_buf, 57);
+			set_segment(frame_buf, 87);
+			set_segment(frame_buf, 86);
+		}
+
+
 		write_digit(frame_buf, digit1, d1);
 		write_digit(frame_buf, digit2, d2);
 		write_digit(frame_buf, digit3, d3);
@@ -359,7 +381,7 @@ void main(void)
 	init_lcd();
 
 	init_serial_port();
-	write_lcd(0,0,3,7);
+	write_lcd(0,1,3,7);
 	sfr_ITC_EXTI.SR1.P3F = 1;
 	ENABLE_INTERRUPTS();
 
