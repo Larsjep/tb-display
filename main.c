@@ -265,7 +265,7 @@ volatile enum State state = CLOCK;
 
 
 enum SerialCommand { CMD_SETTIME = 0x2A, CMD_CLOCK, CMD_TIMER };
-void execute_serial_command(enum SerialCommand cmd, u8 data[2])
+void execute_serial_command(enum SerialCommand cmd, u8 data[3])
 {
 	switch (cmd)
 	{
@@ -307,7 +307,6 @@ ISR_HANDLER(SerialRxInterrupt, _USART_R_RXNE_VECTOR_)
 		case SS_IDLE:
 			if (serial_char == 0xAA)
 			{
-				//write_lcd(0, serial_char / 100, serial_char / 10, serial_char);
 				serialState = SS_CMD;
 			}
 			break;
@@ -365,9 +364,11 @@ void init_serial_port(void)
 	sfr_REMAP.SYSCFG_RMPCR1.USART1TR_REMAP = 1;
 	sfr_USART1.BRR2.byte = 0xB;
 	sfr_USART1.BRR1.byte = 0x8;
+	sfr_USART1.CR1.byte = 0;
+	sfr_USART1.CR3.byte = 0;
+	sfr_USART1.CR5.byte = 0;
 
-
-	sfr_PORTA.CR2.C23 = 1;
+	sfr_PORTA.CR2.C23 = 1; // Enable interrupt on port A bit 3, that is also uart RX pin.
 
 	sfr_USART1.CR2.RIEN = 1;
 	sfr_USART1.CR2.REN = 1;
@@ -382,7 +383,8 @@ void main(void)
 
 	init_serial_port();
 	write_lcd(0,1,3,7);
-	sfr_ITC_EXTI.SR1.P3F = 1;
+	sfr_ITC_EXTI.SR1.P3F = 1; // Clear any pending interrupt on port bit 3
+	sfr_ITC_EXTI.CR1.P3IS = 0x2; // Only interrupt on falling edge on port bit 3.
 	ENABLE_INTERRUPTS();
 
 	for(;;)
