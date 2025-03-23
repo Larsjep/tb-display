@@ -189,7 +189,7 @@ void clock_update(void)
 		
 		if (dots)
 		{
-			frame_buf[11] |= 1 << 6;
+			set_segment(frame_buf, 94);
 		}
 
 		memcpy(&sfr_LCD.RAM0.byte, frame_buf, frame_size);
@@ -244,6 +244,11 @@ void write_lcd(uint8_t d4, uint8_t d3, uint8_t d2, uint8_t d1)
 			set_segment(frame_buf, 57);
 			set_segment(frame_buf, 87);
 			set_segment(frame_buf, 86);
+		}
+
+		if (seconds & 1)
+		{
+			set_segment(frame_buf, 94);
 		}
 
 
